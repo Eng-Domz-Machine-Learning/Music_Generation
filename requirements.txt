@@ -1,0 +1,2 @@
+pretty_midi>=0.2.9
+tqdm>=4.66.0

@@ -1,0 +1,77 @@
+# Data files - exclude but keep directory structure
+data_raw/*
+!data_raw/.gitkeep
+data_processed/*
+!data_processed/.gitkeep
+tokenized/*
+!tokenized/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# IPython
+.ipython/
+profile_default/
+ipython_config.py
+
+# PyCharm
+.idea/
+*.swp
+*.swo
+*~
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# Environments
+.env
+.venv
+env.bak/
+venv.bak/
+
+# IDEs
+.DS_Store
+*.sublime-project
+*.sublime-workspace
+
+# Models (optional - uncomment if you want to exclude trained models)
+# models/*
+# !models/.gitkeep
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
