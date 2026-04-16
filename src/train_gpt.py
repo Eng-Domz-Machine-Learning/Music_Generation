@@ -6,11 +6,12 @@ import argparse
 import json
 import math
 import random
+import re
 import time
 from pathlib import Path
 from typing import List, Sequence
 
-# Prevent local src/tokenize.py from shadowing stdlib tokenize.
+# Prevent local tokenizer scripts from shadowing stdlib tokenize.
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if SCRIPT_DIR in sys.path:
     sys.path.remove(SCRIPT_DIR)
@@ -25,17 +26,17 @@ import torch.nn.functional as F
 @dataclass
 class TrainConfig:
     data_path: str = "tokenized/dataset.jsonl"
-    out_dir: str = "src"
+    out_dir: str = "models"
     seed: int = 42
     val_ratio: float = 0.03
     max_seq_len: int = 512
     vocab_size: int = 288
-    d_model: int = 384
-    n_layers: int = 6
-    n_heads: int = 6
-    d_ff: int = 1536
+    d_model: int = 256
+    n_layers: int = 4
+    n_heads: int = 4
+    d_ff: int = 1024
     dropout: float = 0.1
-    batch_size: int = 12
+    batch_size: int = 16
     grad_accum_steps: int = 4
     max_steps: int = 12000
     eval_every: int = 200
@@ -171,17 +172,30 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def load_dataset(path: Path) -> List[List[int]]:
-    sequences: List[List[int]] = []
+def source_to_piece_id(source_file: str) -> str:
+    """
+    Collapse chunked filenames back to a piece-level identifier.
+
+    Example:
+    - foo_chunk000.mid -> foo
+    - bar_chunk127.midi -> bar
+    """
+    stem = Path(source_file).stem
+    return re.sub(r"_chunk\d+$", "", stem)
+
+
+def load_dataset(path: Path) -> List[tuple[str, List[int]]]:
+    sequences: List[tuple[str, List[int]]] = []
     with path.open("r", encoding="utf-8") as f:
         for line_idx, line in enumerate(f, start=1):
             line = line.strip()
             if not line:
                 continue
             row = json.loads(line)
+            source_file = row.get("source_file")
             ids = row.get("token_ids")
-            if isinstance(ids, list) and len(ids) >= 2:
-                sequences.append([int(x) for x in ids])
+            if isinstance(source_file, str) and isinstance(ids, list) and len(ids) >= 2:
+                sequences.append((source_file, [int(x) for x in ids]))
             if line_idx % 2000 == 0:
                 print(f"[data] loaded {line_idx} lines | usable_sequences={len(sequences)}", flush=True)
     if not sequences:
@@ -190,12 +204,41 @@ def load_dataset(path: Path) -> List[List[int]]:
     return sequences
 
 
-def split_data(sequences: Sequence[List[int]], val_ratio: float, seed: int) -> tuple[list[list[int]], list[list[int]]]:
-    seqs = list(sequences)
-    random.Random(seed).shuffle(seqs)
-    n_val = max(1, int(len(seqs) * val_ratio))
-    val = seqs[:n_val]
-    train = seqs[n_val:]
+def split_data(
+    sequences: Sequence[tuple[str, List[int]]],
+    val_ratio: float,
+    seed: int,
+) -> tuple[list[list[int]], list[list[int]]]:
+    grouped: dict[str, list[list[int]]] = {}
+    for source_file, token_ids in sequences:
+        piece_id = source_to_piece_id(source_file)
+        grouped.setdefault(piece_id, []).append(token_ids)
+
+    piece_ids = list(grouped.keys())
+    random.Random(seed).shuffle(piece_ids)
+
+    total_sequences = len(sequences)
+    target_val_sequences = max(1, int(total_sequences * val_ratio))
+
+    val_piece_ids: set[str] = set()
+    val_count = 0
+    for piece_id in piece_ids:
+        if val_count >= target_val_sequences and val_piece_ids:
+            break
+        val_piece_ids.add(piece_id)
+        val_count += len(grouped[piece_id])
+
+    train: list[list[int]] = []
+    val: list[list[int]] = []
+    for piece_id, piece_sequences in grouped.items():
+        if piece_id in val_piece_ids:
+            val.extend(piece_sequences)
+        else:
+            train.extend(piece_sequences)
+
+    if not train or not val:
+        raise RuntimeError("Piece-level split produced an empty train or validation set.")
+
     return train, val
 
 
@@ -302,7 +345,7 @@ def main() -> None:
     sequences = load_dataset(data_path)
     train_sequences, val_sequences = split_data(sequences, cfg.val_ratio, cfg.seed)
 
-    max_id = max(max(seq) for seq in sequences)
+    max_id = max(max(token_ids) for _, token_ids in sequences)
     if max_id + 1 > cfg.vocab_size:
         cfg.vocab_size = max_id + 1
 
