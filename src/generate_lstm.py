@@ -193,7 +193,7 @@ def generate(
     device: torch.device,
     prompt_ids: List[int],
     max_new_tokens: int,
-    temperature: float = 1.0,
+    temperature: float = 0.3,
     top_k: int = 0,
     id_to_token: Optional[dict] = None,
     token_to_id: Optional[dict] = None,
