@@ -245,11 +245,16 @@ def apply_tempo_bias(
         shift_amount = (token_id - TIME_SHIFT_MIN) + 1
 
         if tempo == "slow":
-            # Mildly penalize short shifts, mildly boost long shifts
-            if shift_amount <= 20:
-                adjusted[token_id] -= 0.5  # Gently discourage short gaps
+            # Stronger "calm" shaping: clearly discourage tiny shifts and
+            # strongly favor long gaps so the piece breathes more.
+            if shift_amount <= 12:
+                adjusted[token_id] -= 1.6
+            elif shift_amount <= 20:
+                adjusted[token_id] -= 0.9
+            elif shift_amount >= 70:
+                adjusted[token_id] += 1.2
             elif shift_amount >= 50:
-                adjusted[token_id] += 0.8  # Gently encourage long gaps
+                adjusted[token_id] += 0.9
         elif tempo == "fast":
             # Mildly penalize long shifts, mildly boost short shifts
             if shift_amount >= 50:
@@ -480,7 +485,10 @@ def load_checkpoint(checkpoint_path: Path) -> tuple:
     if not checkpoint_path.exists():
         raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
 
-    checkpoint = torch.load(str(checkpoint_path), map_location="cpu", weights_only=False)
+    try:
+        checkpoint = torch.load(str(checkpoint_path), map_location="cpu", weights_only=False)
+    except TypeError:
+        checkpoint = torch.load(str(checkpoint_path), map_location="cpu")
     config_dict = checkpoint.get("config", {})
     cfg = GPTConfig(**config_dict) if config_dict else GPTConfig()
 

@@ -1,8 +1,7 @@
 """Gradio interface for the music generation app."""
 
 import gradio as gr
-from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from app.config import (
     APP_TITLE,
@@ -15,15 +14,37 @@ from app.config import (
     DEFAULT_REPETITION_WINDOW,
     DEFAULT_NO_REPEAT_NGRAM_SIZE,
     DEFAULT_TEMPO,
+    DEFAULT_MOOD_PRESET,
     DEFAULT_NUM_SAMPLES,
     MAX_SAMPLES,
     MIN_TEMPERATURE,
     MAX_TEMPERATURE,
     MIN_REPETITION_PENALTY,
     MAX_REPETITION_PENALTY,
-    TEMPO_CHOICES,
+    TEMPO_UI_CHOICES,
+    TEMPO_TIME_SCALE,
+    MOOD_PRESETS,
 )
 from app.inference import get_generator
+
+
+def apply_mood_preset(preset_name: str):
+    """Return UI updates for a selected mood preset."""
+    preset = MOOD_PRESETS.get(preset_name)
+    if preset is None:
+        return (
+            gr.update(),
+            gr.update(),
+            gr.update(),
+            gr.update(),
+        )
+
+    return (
+        gr.update(value=preset["tempo"]),
+        gr.update(value=preset["temperature"]),
+        gr.update(value=preset["top_p"]),
+        gr.update(value=preset["max_new_tokens"]),
+    )
 
 
 def generate_music(
@@ -37,7 +58,7 @@ def generate_music(
     no_repeat_ngram_size: int,
     tempo: str,
     seed: int,
-) -> Tuple[str, List[str]]:
+) -> Tuple[str, List[str], Optional[str]]:
     """
     Generate music and return status message and file paths.
     
@@ -54,7 +75,7 @@ def generate_music(
         seed: Random seed
     
     Returns:
-        Tuple of (status message, list of file paths)
+        Tuple of (status message, list of midi file paths, preview audio path)
     """
     try:
         # Validate inputs
@@ -81,7 +102,9 @@ def generate_music(
         )
 
         if not output_files:
-            return "❌ Generation failed: No valid samples produced.", []
+            return "❌ Generation failed: No valid samples produced.", [], None
+
+        preview_audio = generator.build_audio_preview(output_files[0])
 
         status_msg = f"✅ Successfully generated {len(output_files)} sample(s)!\n\n"
         status_msg += f"📊 Parameters:\n"
@@ -89,14 +112,19 @@ def generate_music(
         status_msg += f"  • Top-P: {top_p:.2f}\n"
         status_msg += f"  • Repetition Penalty: {repetition_penalty:.2f}\n"
         status_msg += f"  • Tempo: {tempo}\n"
+        status_msg += f"  • Tempo Time Scale: x{TEMPO_TIME_SCALE.get(tempo, 1.0):.2f}\n"
         status_msg += f"  • Max Tokens: {max_new_tokens}\n\n"
+        if preview_audio:
+            status_msg += "🎧 Preview is ready below (first generated sample).\n\n"
+        else:
+            status_msg += "⚠️ Audio preview could not be rendered, but MIDI files are ready.\n\n"
         status_msg += f"📁 Files saved to: {output_files[0].rsplit('/', 1)[0]}"
 
-        return status_msg, output_files
+        return status_msg, output_files, preview_audio
 
     except Exception as e:
         error_msg = f"❌ Error during generation: {str(e)}"
-        return error_msg, []
+        return error_msg, [], None
 
 
 def create_interface() -> gr.Blocks:
@@ -153,11 +181,27 @@ def create_interface() -> gr.Blocks:
                 # Music-specific controls
                 gr.Markdown("#### Music Controls")
 
+                mood_preset = gr.Dropdown(
+                    choices=list(MOOD_PRESETS.keys()),
+                    value=DEFAULT_MOOD_PRESET,
+                    label="Mood Preset",
+                    info="Quick-start vibe preset. You can still edit values manually after selecting.",
+                )
+
                 tempo = gr.Radio(
-                    choices=TEMPO_CHOICES,
+                    choices=TEMPO_UI_CHOICES,
                     value=DEFAULT_TEMPO,
                     label="Tempo",
-                    info="Adjust pacing of generated music",
+                    info="Controls musical pacing with model bias + deterministic time scaling.",
+                )
+
+                gr.Markdown(
+                    """
+                    **Preset Guide**
+                    - **Calm / Reflective**: slower, spacious phrasing
+                    - **Balanced / Storytelling**: all-purpose musical flow
+                    - **Bright / Energetic**: quicker movement and momentum
+                    """
                 )
 
                 # Advanced controls (collapsed)
@@ -220,6 +264,13 @@ def create_interface() -> gr.Blocks:
                 )
 
                 # File outputs
+                gr.Markdown("#### 🎧 Listen Before Download")
+                audio_preview = gr.Audio(
+                    label="Generated Audio Preview (first sample)",
+                    type="filepath",
+                    interactive=False,
+                )
+
                 gr.Markdown("#### 📥 Download Generated MIDI Files")
                 file_output = gr.File(
                     label="Generated MIDI Files",
@@ -228,6 +279,12 @@ def create_interface() -> gr.Blocks:
                 )
 
         # Connect generate button
+        mood_preset.change(
+            apply_mood_preset,
+            inputs=[mood_preset],
+            outputs=[tempo, temperature, top_p, max_new_tokens],
+        )
+
         generate_btn.click(
             generate_music,
             inputs=[
@@ -242,7 +299,7 @@ def create_interface() -> gr.Blocks:
                 tempo,
                 seed,
             ],
-            outputs=[status_output, file_output],
+            outputs=[status_output, file_output, audio_preview],
         )
 
         # Footer

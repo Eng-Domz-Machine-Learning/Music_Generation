@@ -353,7 +353,10 @@ def load_checkpoint(checkpoint_path: Path) -> Tuple[nn.Module, dict]:
     if not checkpoint_path.exists():
         raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
 
-    checkpoint = torch.load(str(checkpoint_path), map_location="cpu", weights_only=False)
+    try:
+        checkpoint = torch.load(str(checkpoint_path), map_location="cpu", weights_only=False)
+    except TypeError:
+        checkpoint = torch.load(str(checkpoint_path), map_location="cpu")
 
     # Get config from checkpoint
     config_dict = checkpoint.get("config", {})

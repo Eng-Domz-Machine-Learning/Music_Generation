@@ -6,10 +6,12 @@ import json
 import random
 from typing import List, Optional, Tuple
 import importlib.util
+import wave
 
 import torch
 import torch.nn as nn
 import pretty_midi
+import numpy as np
 
 from app.config import (
     PROJECT_ROOT,
@@ -17,7 +19,16 @@ from app.config import (
     ID_TO_TOKEN_PATH,
     VOCAB_PATH,
     GENERATED_DIR,
+    TEMPO_TIME_SCALE,
 )
+
+
+def load_checkpoint_compat(path: Path, map_location):
+    """Load a checkpoint across torch versions with optional weights_only support."""
+    try:
+        return torch.load(str(path), map_location=map_location, weights_only=False)
+    except TypeError:
+        return torch.load(str(path), map_location=map_location)
 
 # Add src to path so we can import training modules
 SRC_DIR = PROJECT_ROOT / "src"
@@ -58,7 +69,7 @@ class MusicGenerator:
         if not CHECKPOINT_PATH.exists():
             raise FileNotFoundError(f"Checkpoint not found: {CHECKPOINT_PATH}")
 
-        checkpoint = torch.load(str(CHECKPOINT_PATH), map_location=self.device, weights_only=False)
+        checkpoint = load_checkpoint_compat(CHECKPOINT_PATH, self.device)
         config_dict = checkpoint.get("config", {})
         cfg = GPTConfig(**config_dict) if config_dict else GPTConfig()
 
@@ -108,6 +119,27 @@ class MusicGenerator:
             self.token_to_id = {k: int(v) for k, v in json.load(f).items()}
 
         self.vocab_size = len(self.id_to_token)
+
+    @staticmethod
+    def _apply_tempo_time_scale(notes: List[pretty_midi.Note], tempo: str) -> List[pretty_midi.Note]:
+        """Apply deterministic time scaling so tempo selections are clearly audible."""
+        scale = TEMPO_TIME_SCALE.get(tempo, 1.0)
+        if abs(scale - 1.0) < 1e-6:
+            return notes
+
+        scaled_notes: List[pretty_midi.Note] = []
+        for note in notes:
+            start = max(0.0, note.start * scale)
+            end = max(start + 0.01, note.end * scale)
+            scaled_notes.append(
+                pretty_midi.Note(
+                    velocity=note.velocity,
+                    pitch=note.pitch,
+                    start=start,
+                    end=end,
+                )
+            )
+        return scaled_notes
 
     def generate(
         self,
@@ -173,6 +205,7 @@ class MusicGenerator:
                 if not notes:
                     print(f"Sample {sample_idx}: No notes decoded")
                     continue
+                notes = self._apply_tempo_time_scale(notes, tempo)
 
                 # Save MIDI
                 output_path = GENERATED_DIR / f"sample_{sample_idx:03d}_{sample_seed}.mid"
@@ -188,6 +221,41 @@ class MusicGenerator:
                 continue
 
         return output_paths
+
+    def build_audio_preview(self, midi_path: str, sample_rate: int = 22050) -> Optional[str]:
+        """
+        Render a WAV preview from a generated MIDI file.
+
+        Returns:
+            Path to WAV file, or None if preview rendering fails.
+        """
+        midi_file = Path(midi_path)
+        if not midi_file.exists():
+            return None
+
+        preview_path = midi_file.with_suffix(".wav")
+        try:
+            pm = pretty_midi.PrettyMIDI(str(midi_file))
+            waveform = pm.synthesize(fs=sample_rate)
+            if waveform is None or len(waveform) == 0:
+                return None
+
+            # Normalize and convert to int16 PCM for broad player compatibility.
+            peak = float(np.max(np.abs(waveform)))
+            if peak > 0:
+                waveform = waveform / peak
+            waveform_int16 = np.clip(waveform * 32767.0, -32768.0, 32767.0).astype(np.int16)
+
+            with wave.open(str(preview_path), "wb") as wav_file:
+                wav_file.setnchannels(1)
+                wav_file.setsampwidth(2)  # int16
+                wav_file.setframerate(sample_rate)
+                wav_file.writeframes(waveform_int16.tobytes())
+
+            return str(preview_path)
+        except Exception as exc:
+            print(f"Audio preview rendering failed for {midi_path}: {exc}")
+            return None
 
 
 # Global instance (lazy loaded)

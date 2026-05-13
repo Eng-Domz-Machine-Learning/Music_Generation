@@ -1,0 +1,10 @@
+{
+  "train_windows": 147473,
+  "val_windows": 4603,
+  "test_windows": 4792,
+  "best_val_loss": 1.737646951675415,
+  "final_test_loss": 1.58016037940979,
+  "final_test_perplexity": 4.855734508626841,
+  "total_steps": 24000,
+  "vocab_size": 288
+}

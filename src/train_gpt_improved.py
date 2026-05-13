@@ -49,7 +49,7 @@ from torch.utils.data import Dataset, DataLoader
 class GPTConfig:
     """Configuration for GPT model and training."""
     # Data
-    data_path: str = "tokenized/dataset.jsonl"
+    data_path: str = "Music_Generation/final_tokenized_data/dataset.jsonl"
     out_dir: str = "models/gpt"
     val_ratio: float = 0.03
     test_ratio: float = 0.03
@@ -57,19 +57,19 @@ class GPTConfig:
     # Model architecture
     vocab_size: int = 288  # Will be inferred from data
     max_seq_len: int = 256  # Context length
-    d_model: int = 256
-    n_layers: int = 4
-    n_heads: int = 4
-    d_ff: int = 1024
+    d_model: int = 512
+    n_layers: int = 8
+    n_heads: int = 8
+    d_ff: int = 2048
     dropout: float = 0.1
 
     # Training
     batch_size: int = 16
-    max_steps: int = 12000
+    max_steps: int = 24000
     grad_accum_steps: int = 1
     lr: float = 6e-4
     min_lr: float = 6e-5
-    warmup_steps: int = 600
+    warmup_steps: int = 1200
     weight_decay: float = 0.1
     grad_clip: float = 1.0
 
